@@ -1,0 +1,31 @@
+-- Immo Tunisia — close the real EXECUTE hole on handle_new_user()
+--
+-- The previous migration (20261008130000) ran:
+--   revoke execute on function public.handle_new_user() from anon, authenticated;
+-- but get_advisors still reported it as callable by anon/authenticated via
+-- /rest/v1/rpc/handle_new_user afterwards. Checked information_schema.routine_privileges
+-- directly:
+--
+--   grantee       | privilege_type
+--   --------------+----------------
+--   PUBLIC        | EXECUTE
+--   postgres      | EXECUTE
+--   service_role  | EXECUTE
+--
+-- anon/authenticated never had an explicit grant to revoke — every role is
+-- implicitly a member of the PUBLIC pseudo-role, and Postgres grants
+-- EXECUTE to PUBLIC by default when a function is created unless told
+-- otherwise. So the previous REVOKE was a no-op: anon/authenticated were
+-- (and, until this migration, still are) reaching the function through the
+-- PUBLIC grant the whole time. The actual fix is revoking from PUBLIC.
+--
+-- Safe for the signup trigger: trigger functions are invoked by the
+-- executor directly via the OID stored in pg_trigger, not through the
+-- name-resolution path that enforces the EXECUTE ACL — that check only
+-- applies to an explicit call (`select handle_new_user()`, or PostgREST's
+-- RPC endpoint). Revoking from PUBLIC blocks direct/RPC calls without
+-- touching the trigger. postgres and service_role keep their own explicit
+-- grants untouched. Confirmed with a live signup smoke test after this
+-- migration.
+
+revoke execute on function public.handle_new_user() from public;

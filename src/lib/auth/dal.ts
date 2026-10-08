@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Profile } from "@/lib/supabase/database.types";
+import type { Profile } from "@/lib/supabase/types";
 
 /**
  * Data Access Layer: the single place that reads "who is the current user"
@@ -59,7 +59,12 @@ export const getProfile = cache(async (): Promise<Profile | null> => {
     .single();
 
   if (error) return null;
-  return data;
+  // `role`/`locale` come back as plain `string` from PostgREST (Postgres has
+  // no native enum for them — see supabase/migrations — just a `check`
+  // constraint), so the client can't narrow them on its own. The cast to the
+  // app-level `Profile` (src/lib/supabase/types.ts) is safe because that
+  // constraint is what actually guarantees the value at write time.
+  return data as Profile;
 });
 
 /** Redirects to /login if signed out; otherwise returns the verified user. */

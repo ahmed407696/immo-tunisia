@@ -22,25 +22,8 @@
 create extension if not exists postgis;
 
 -- ============================================================================
--- Helper functions (created before the tables/policies that use them)
+-- Helper functions, part 1 (no table dependencies, safe to create anywhere)
 -- ============================================================================
-
--- Returns true if the currently authenticated user has the 'admin' role.
--- SECURITY DEFINER + a pinned search_path lets this safely read
--- public.profiles from inside a policy on another table without RLS
--- recursion and without being hijackable via a hostile search_path.
-create or replace function public.is_admin()
-returns boolean
-language sql
-security definer
-set search_path = public, pg_temp
-stable
-as $$
-  select exists (
-    select 1 from public.profiles
-    where id = auth.uid() and role = 'admin'
-  );
-$$;
 
 -- Generic updated_at maintenance trigger.
 create or replace function public.set_updated_at()
@@ -79,6 +62,28 @@ comment on column public.profiles.role is 'Authorization role, enforced via RLS 
 create trigger set_profiles_updated_at
   before update on public.profiles
   for each row execute function public.set_updated_at();
+
+-- Returns true if the currently authenticated user has the 'admin' role.
+-- SECURITY DEFINER + a pinned search_path lets this safely read
+-- public.profiles from inside a policy on another table without RLS
+-- recursion and without being hijackable via a hostile search_path.
+-- Must be created after public.profiles exists: a `language sql` function
+-- body is resolved against the catalog at CREATE FUNCTION time (unlike
+-- plpgsql, which only parses its body as an opaque string until first
+-- call), so this fails with "relation does not exist" if it's created any
+-- earlier.
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+set search_path = public, pg_temp
+stable
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'admin'
+  );
+$$;
 
 -- Auto-create a profile row whenever a new auth user is created (email/password
 -- signup or OAuth). SECURITY DEFINER is required here because this runs
